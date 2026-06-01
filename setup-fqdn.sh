@@ -5,12 +5,12 @@ set -e
 # GT AI OS - FQDN Routing Setup
 # <TENANT_FQDN>   → <VM_IP>:3002
 # <CTP_FQDN>      → <VM_IP>:3001
-# ============================================================
 
 # Example values:
 #   VM_IP="10.255.255.60"
 #   TENANT_FQDN="chat.example.com"
 #   CTP_FQDN="ctp-chat.example.com"
+# ============================================================
 
 VM_IP="<VM_IP>"
 TENANT_FQDN="<TENANT_FQDN>"
