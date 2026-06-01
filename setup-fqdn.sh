@@ -15,11 +15,11 @@ set -e
 VM_IP="<VM_IP>"
 TENANT_FQDN="<TENANT_FQDN>"
 CTP_FQDN="<CTP_FQDN>"
-
+ 
 echo "=== [1/6] Installing nginx + stream module ==="
 sudo apt update && sudo apt install -y nginx libnginx-mod-stream
 sudo systemctl enable nginx
-
+ 
 echo "=== [2/6] Writing stream.conf ==="
 sudo tee /etc/nginx/stream.conf > /dev/null <<EOF
 stream {
@@ -34,7 +34,7 @@ stream {
   }
 }
 EOF
-
+ 
 echo "=== [3/6] Injecting stream.conf into nginx.conf ==="
 # Remove any existing include to avoid duplicates
 sudo sed -i '/include \/etc\/nginx\/stream.conf/d' /etc/nginx/nginx.conf
@@ -42,31 +42,48 @@ sudo sed -i '/include \/etc\/nginx\/stream.conf/d' /etc/nginx/nginx.conf
 sudo sed -i '/^http {/i include /etc/nginx/stream.conf;' /etc/nginx/nginx.conf
 # Remove default site
 sudo rm -f /etc/nginx/sites-enabled/default
-
+ 
 echo "=== [4/6] Testing and reloading nginx ==="
 sudo nginx -t && sudo systemctl reload nginx
-
+ 
 echo "=== [5/6] Patching RKE2 ingress off port 443 ==="
 KUBECTL="/var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml"
-
+ 
 echo "Current ingress ports:"
 $KUBECTL -n kube-system get daemonset rke2-ingress-nginx-controller -o json | \
   python3 -c "import json,sys; ds=json.load(sys.stdin); ports=ds['spec']['template']['spec']['containers'][0]['ports']; [print(i, p) for i,p in enumerate(ports)]"
-
-$KUBECTL -n kube-system patch daemonset rke2-ingress-nginx-controller \
-  --type=json -p='[{"op":"remove","path":"/spec/template/spec/containers/0/ports/0"}]'
-
+ 
+# Auto-detect the index of hostPort 443
+PORT_INDEX=$($KUBECTL -n kube-system get daemonset rke2-ingress-nginx-controller -o json | \
+  python3 -c "
+import json,sys
+ds=json.load(sys.stdin)
+ports=ds['spec']['template']['spec']['containers'][0]['ports']
+for i,p in enumerate(ports):
+    if p.get('hostPort') == 443:
+        print(i)
+        break
+")
+ 
+if [ -z "$PORT_INDEX" ]; then
+  echo "hostPort 443 not found on RKE2 ingress — already patched or not present, skipping."
+else
+  echo "Found hostPort 443 at index $PORT_INDEX — patching..."
+  $KUBECTL -n kube-system patch daemonset rke2-ingress-nginx-controller \
+    --type=json -p="[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/ports/${PORT_INDEX}\"}]"
+fi
+ 
 echo "Waiting for ingress pods to restart..."
 sleep 15
-
+ 
 echo "=== [6/6] Restarting nginx and verifying port ownership ==="
 sudo systemctl restart nginx
 sleep 5
-
+ 
 echo ""
 echo "--- Port 443 ownership ---"
 sudo ss -tlnp | grep 443
-
+ 
 echo ""
 echo "=== Setup complete ==="
 echo "Test from an EXTERNAL machine (not this VM):"
